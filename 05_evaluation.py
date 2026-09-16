@@ -259,6 +259,96 @@ display(results.tables["eval_results"])
 
 # COMMAND ----------
 
+# DBTITLE 1,Baseline vs Memory comparison
+# MAGIC %md
+# MAGIC ## Baseline vs Memory-Backed Agent
+# MAGIC
+# MAGIC To demonstrate the value of UC Managed Memory, we run the **same 4 scenarios** through a **baseline agent** that has:
+# MAGIC - Same model (`databricks-claude-sonnet-4-6`)
+# MAGIC - Same conversation API
+# MAGIC - **No memory context** (no customer preferences, escalation history, prior tickets, playbooks)
+# MAGIC - **Generic instructions** ("draft a professional customer email" — no Lumen-specific tuning)
+# MAGIC
+# MAGIC The baseline represents what Swigert does today: a single prompt + Claude call with no institutional knowledge.
+
+# COMMAND ----------
+
+# DBTITLE 1,Run baseline evaluation (no memory)
+# --- Baseline predict function: same model, NO memory, generic instructions ---
+BASELINE_INSTRUCTIONS = """
+You are a customer communications agent for a telecommunications company.
+Draft professional, empathetic customer emails for service tickets.
+Be clear and specific.
+"""
+
+def baseline_predict_fn(query: str) -> str:
+    """Invoke the agent WITHOUT memory context — vanilla baseline."""
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": BASELINE_INSTRUCTIONS},
+            {"role": "user", "content": query + "\n\nDraft the email."},
+        ],
+    )
+    return response.choices[0].message.content
+
+print("Running BASELINE evaluation (no memory, generic instructions)...")
+print("4 scenarios x 5 scorers = 20 judgments\n")
+
+baseline_results = mlflow.genai.evaluate(
+    data=eval_data,
+    predict_fn=baseline_predict_fn,
+    scorers=[lumen_voice, context_utilization, tone_calibration, playbook_compliance, expected_facts_scorer],
+)
+
+print("\nBaseline evaluation complete.")
+
+# COMMAND ----------
+
+# DBTITLE 1,Side-by-side comparison: Baseline vs Memory
+import pandas as pd
+
+scenes = ["1: New Ticket", "2: Status Update", "3: Escalation", "4: Resolution"]
+scorer_names = ["lumen_voice", "context_utilization", "tone_calibration", "playbook_compliance", "expected_facts"]
+
+def extract_scores(eval_result, label):
+    """Extract yes/no scores from an eval result into a labeled DataFrame."""
+    df = eval_result.tables["eval_results"]
+    rows = []
+    for i, scene in enumerate(scenes):
+        row = {"Scene": scene, "Agent": label}
+        for s in scorer_names:
+            col = f"{s}/value"
+            if col in df.columns and i < len(df):
+                val = df.iloc[i][col]
+                row[s] = "✅" if str(val).lower() == "yes" else ("❌" if str(val).lower() == "no" else "➖")
+            else:
+                row[s] = "➖"
+        rows.append(row)
+    return rows
+
+baseline_rows = extract_scores(baseline_results, "❌ Baseline (no memory)")
+memory_rows = extract_scores(results, "✅ Memory-backed")
+
+# Interleave: baseline then memory for each scene
+comparison_rows = []
+for i in range(len(scenes)):
+    comparison_rows.append(baseline_rows[i])
+    comparison_rows.append(memory_rows[i])
+
+comparison_df = pd.DataFrame(comparison_rows)
+comparison_df.columns = ["Scene", "Agent", "Voice", "Context", "Tone", "Playbook", "Facts"]
+
+# Summary counts
+for label, rows in [("❌ Baseline", baseline_rows), ("✅ Memory", memory_rows)]:
+    passed = sum(1 for r in rows for s in scorer_names if r[s] == "✅")
+    print(f"{label}: {passed}/20 passed")
+
+print()
+display(comparison_df)
+
+# COMMAND ----------
+
 # DBTITLE 1,Register scorers for production monitoring
 from mlflow.genai.scorers import ScorerSamplingConfig, list_scorers, delete_scorer
 
