@@ -349,6 +349,153 @@ display(comparison_df)
 
 # COMMAND ----------
 
+# DBTITLE 1,Terse-input scenarios: where memory matters
+# MAGIC %md
+# MAGIC ## Terse-Input Evaluation: Production-Realistic Scenarios
+# MAGIC
+# MAGIC The rich-input scenarios above give the baseline all the context it needs in the prompt. In production, agents receive **terse ticket alerts** — a ticket ID, a customer ID, a one-line description. Everything else must come from memory:
+# MAGIC
+# MAGIC | Detail | Rich prompt | Terse prompt | Source in memory |
+# MAGIC |--------|:-----------:|:------------:|------------------|
+# MAGIC | Customer name (Sarah Chen) | ✅ | ❌ | `customer-CUST-001` scope |
+# MAGIC | Company (Meridian Health) | ✅ | ❌ | `customer-CUST-001` scope |
+# MAGIC | SLA tier (Platinum) | ✅ | ❌ | `lumen-org` scope |
+# MAGIC | Escalation history (3 in 12 mo) | ✅ | ❌ | `customer-CUST-001` scope |
+# MAGIC | Prior ticket (INC-28847) | ✅ | ❌ | `ticket-INC-30142` scope |
+# MAGIC | Playbook structure | ✅ | ❌ | `lumen-playbooks` scope |
+# MAGIC | Communication standards | ✅ | ❌ | `lumen-org` scope |
+# MAGIC
+# MAGIC This is the comparison that shows the value of memory.
+
+# COMMAND ----------
+
+# DBTITLE 1,Define terse evaluation dataset
+# --- Terse-input scenarios: minimal alert data, memory must fill the gaps ---
+terse_eval_data = [
+    {
+        "inputs": {"query": "New P1 ticket INC-30142 for customer CUST-001. Circuit CKT-44521 is down. Correlated with active outage OUT-5521. Draft the initial acknowledgment email to the customer contact."},
+        "expectations": {
+            "expected_facts": [
+                "Addresses the customer contact by name (Sarah Chen)",
+                "References the company name (Meridian Health or Meridian Health Systems)",
+                "Mentions the SLA tier (Platinum) or Platinum-level response commitment",
+                "Acknowledges this is a repeat incident or references prior ticket INC-28847",
+            ]
+        },
+    },
+    {
+        "inputs": {"query": "Status update for INC-30142: repair crew on-site at splice point SP-4421, ETA 5:30 PM CT for restoration. Draft the 1-hour status update email to the customer contact."},
+        "expectations": {
+            "expected_facts": [
+                "Addresses Sarah Chen by name",
+                "References Meridian Health by company name",
+                "Acknowledges that SP-4421 is the same splice point from the prior incident",
+                "Cites the prior ticket number INC-28847 when referencing history",
+            ]
+        },
+    },
+    {
+        "inputs": {"query": "INC-30142: the customer contact replied angrily, is threatening to switch providers, and wants a VP-level meeting. Draft the escalation response."},
+        "expectations": {
+            "expected_facts": [
+                "Acknowledges a pattern of escalations (3 in 12 months) — not just this one incident",
+                "Follows the escalation playbook tone shift: acknowledge frustration, reference history, elevate ownership",
+                "Commits to VP-level engagement as required by Platinum escalation protocol",
+                "Addresses the customer by name (Sarah Chen) and company (Meridian Health)",
+            ]
+        },
+    },
+    {
+        "inputs": {"query": "INC-30142 is resolved. RCA: contractor used mechanical splice instead of fusion splice at SP-4421. VP Marcus Thompson is briefed and wants to sign the resolution letter. Draft the resolution email from VP Thompson to the customer contact."},
+        "expectations": {
+            "expected_facts": [
+                "Addresses Sarah Chen by name and references Meridian Health",
+                "References the Platinum SLA tier or Platinum-level commitments",
+                "Acknowledges the 3-escalation pattern as systemic, not isolated",
+                "Offers concrete preventive actions with specific timelines",
+                "Uses Lumen communication standards: 'we' voice, ticket reference, structured sections",
+            ]
+        },
+    },
+]
+
+print(f"Terse evaluation dataset: {len(terse_eval_data)} scenarios")
+for i, row in enumerate(terse_eval_data):
+    prompt_len = len(row['inputs']['query'])
+    print(f"  Scene {i+1}: {prompt_len} chars (vs ~{len(eval_data[i]['inputs']['query'])} rich), {len(row['expectations']['expected_facts'])} expected facts")
+
+# COMMAND ----------
+
+# DBTITLE 1,Run terse evaluation: baseline vs memory
+print("=" * 80)
+print("TERSE-INPUT EVALUATION: Baseline (no memory) vs Memory-backed")
+print("=" * 80)
+
+print("\n--- Running BASELINE on terse inputs ---")
+terse_baseline = mlflow.genai.evaluate(
+    data=terse_eval_data,
+    predict_fn=baseline_predict_fn,
+    scorers=[lumen_voice, context_utilization, tone_calibration, playbook_compliance, expected_facts_scorer],
+)
+
+print("\n--- Running MEMORY-BACKED on terse inputs ---")
+terse_memory = mlflow.genai.evaluate(
+    data=terse_eval_data,
+    predict_fn=predict_fn,
+    scorers=[lumen_voice, context_utilization, tone_calibration, playbook_compliance, expected_facts_scorer],
+)
+
+print("\nBoth evaluations complete.")
+
+# COMMAND ----------
+
+# DBTITLE 1,Terse-input comparison: Baseline vs Memory
+import pandas as pd
+
+scorer_names = ["lumen_voice", "context_utilization", "tone_calibration", "playbook_compliance", "expected_facts"]
+terse_scenes = ["1: Terse New Ticket", "2: Terse Status Update", "3: Terse Escalation", "4: Terse Resolution"]
+
+def extract_terse_scores(eval_result, label, scene_labels):
+    df = eval_result.tables["eval_results"]
+    rows = []
+    for i, scene in enumerate(scene_labels):
+        row = {"Scene": scene, "Agent": label}
+        for s in scorer_names:
+            col = f"{s}/value"
+            if col in df.columns and i < len(df):
+                val = df.iloc[i][col]
+                row[s] = "✅" if str(val).lower() in ("yes", "true") else ("❌" if str(val).lower() in ("no", "false") else "➖")
+            else:
+                row[s] = "➖"
+        rows.append(row)
+    return rows
+
+terse_baseline_rows = extract_terse_scores(terse_baseline, "❌ Baseline", terse_scenes)
+terse_memory_rows = extract_terse_scores(terse_memory, "✅ Memory", terse_scenes)
+
+# Interleave
+terse_comparison = []
+for i in range(len(terse_scenes)):
+    terse_comparison.append(terse_baseline_rows[i])
+    terse_comparison.append(terse_memory_rows[i])
+
+terse_df = pd.DataFrame(terse_comparison)
+terse_df.columns = ["Scene", "Agent", "Voice", "Context", "Tone", "Playbook", "Facts"]
+
+# Summary
+print("TERSE-INPUT RESULTS (production-realistic prompts)")
+print("=" * 55)
+for label, rows in [("❌ Baseline (no memory)", terse_baseline_rows), ("✅ Memory-backed", terse_memory_rows)]:
+    passed = sum(1 for r in rows for s in scorer_names if r[s] == "✅")
+    failed = sum(1 for r in rows for s in scorer_names if r[s] == "❌")
+    null   = sum(1 for r in rows for s in scorer_names if r[s] == "➖")
+    print(f"{label}: {passed} pass / {failed} fail / {null} null")
+
+print()
+display(terse_df)
+
+# COMMAND ----------
+
 # DBTITLE 1,Register scorers for production monitoring
 from mlflow.genai.scorers import ScorerSamplingConfig, list_scorers, delete_scorer
 
