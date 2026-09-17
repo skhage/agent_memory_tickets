@@ -25,10 +25,24 @@ w = WorkspaceClient()
 host = w.config.host.rstrip('/')
 token = w.tokens.create(comment="swigert-memory-setup", lifetime_seconds=3600).token_value
 
-CATALOG = "cmegdemos_catalog"
-SCHEMA = "swigert"
-STORE_NAME = "agent_memory"
+from pathlib import Path
+import yaml
+
+CONFIG_PATH = Path("/Workspace/Users/stephen.hage@databricks.com/agent_memory_tickets/demo_config.yaml")
+with CONFIG_PATH.open() as f:
+    CONFIG = yaml.safe_load(f)
+
+CATALOG = CONFIG["catalog_name"]
+SCHEMA = CONFIG["schema_name"]
+STORE_NAME = CONFIG["memory_store_name"]
 FULL_STORE_NAME = f"{CATALOG}.{SCHEMA}.{STORE_NAME}"
+
+CUSTOMER_ID = CONFIG["customer"]["id"]
+TICKET_ID = CONFIG["incident"]["ticket_id"]
+CUSTOMER_SCOPE = f"{CONFIG['memory_scopes']['customer_scope_prefix']}{CUSTOMER_ID}"
+TICKET_SCOPE = f"{CONFIG['memory_scopes']['ticket_scope_prefix']}{TICKET_ID}"
+ORG_SCOPE = CONFIG["memory_scopes"]["org_scope"]
+PLAYBOOK_SCOPE = CONFIG["memory_scopes"]["playbooks_scope"]
 
 headers = {
     "Authorization": f"Bearer {token}",
@@ -191,7 +205,7 @@ playbook_entries = [
 - Lead with what we know, not what we don't.
 - If repeat incident on same circuit, acknowledge explicitly. Do NOT pretend it's new.
 - Provide specific next steps and timeline, not vague reassurances.
-- For healthcare/financial: acknowledge business impact explicitly.
+- For carrier/financial: acknowledge business impact explicitly.
 
 ## Diagnostic Steps
 1. Verify circuit status in monitoring (SNMP/syslog alerts)
@@ -283,49 +297,49 @@ print(f"\nSeeded {len(playbook_entries)} entries in lumen-playbooks scope")
 
 # COMMAND ----------
 
-# DBTITLE 1,Seed: customer-CUST-001 scope (Meridian Health)
-# Customer memory for Meridian Health (the primary demo customer)
+# DBTITLE 1,Seed: customer-CUST-001 scope (LakeLink Fiber)
+# Customer memory for LakeLink Fiber (the primary demo customer)
 cust001_entries = [
     {
         "path": "/profile/contact.md",
-        "contents": """# Meridian Health Systems - Primary Contact
+        "contents": """# LakeLink Fiber - Primary Contact
 - **Name:** Sarah Chen
-- **Email:** sarah.chen@meridianhealth.com
+- **Email:** sarah.chen@lakelinkfiber.com
 - **Phone:** +1-312-555-0142
 - **Timezone:** America/Chicago (Central)
 - **Preferred Channel:** Email for initial contact; phone for P1 escalations
 - **Communication Style:** Direct and expects specifics. Does not respond well to platitudes or vague reassurances. Appreciates when you acknowledge prior history.""",
-        "description": "Meridian Health primary contact details and communication preferences"
+        "description": "LakeLink Fiber primary contact details and communication preferences"
     },
     {
         "path": "/profile/account.md",
-        "contents": """# Meridian Health Systems - Account Details
+        "contents": """# LakeLink Fiber - Account Details
 - **Customer ID:** CUST-001
 - **SLA Tier:** Platinum
 - **Account Manager:** James Rodriguez
-- **Industry:** Healthcare (HIPAA-sensitive)
+- **Industry:** Telecommunications — Fiber ISP (CPNI-sensitive)
 - **Services:** MPLS, DIA, SD-WAN, Voice, Cloud Connect
 - **Key Circuits:** CKT-44521 (primary MPLS to DR site), CKT-44522, CKT-44530, CKT-44531
 - **Contract Value:** Enterprise tier
-- **Billing ID:** BILL-MH-4452""",
-        "description": "Meridian Health account details, SLA tier, and service inventory"
+- **Billing ID:** BILL-LF-4452""",
+        "description": "LakeLink Fiber account details, SLA tier, and service inventory"
     },
     {
         "path": "/profile/preferences.md",
-        "contents": """# Meridian Health - Communication Preferences (Learned)
+        "contents": """# LakeLink Fiber - Communication Preferences (Learned)
 - Sarah prefers detailed technical explanations over simplified summaries.
 - For P1 incidents, she expects a phone call within 15 minutes of acknowledgment.
 - She tracks ticket resolution times and compares to SLA commitments.
 - She has explicitly stated she does not want to hear "we're working on it" without specifics.
 - After INC-28847, she was promised the fiber splice point would be reinforced and inspected quarterly. Any recurrence on CKT-44521 must reference this commitment.""",
-        "description": "Learned communication preferences for Meridian Health from prior interactions"
+        "description": "Learned communication preferences for LakeLink Fiber from prior interactions"
     },
     {
         "path": "/history/escalations.md",
-        "contents": """# Meridian Health - Escalation History
+        "contents": """# LakeLink Fiber - Escalation History
 
 ## Escalation 1: INC-28847 (2026-08-12)
-- **Trigger:** MPLS circuit CKT-44521 down for 6 hours. EMR connectivity lost.
+- **Trigger:** MPLS circuit CKT-44521 down for 6 hours. OSS/BSS connectivity lost.
 - **Severity:** P1
 - **Resolution:** Fiber splice repair at SP-4421. Circuit restored at 3:30 PM CT.
 - **Commitment Made:** Splice point reinforced, added to quarterly inspection rotation.
@@ -346,28 +360,28 @@ cust001_entries = [
     },
     {
         "path": "/network/topology.md",
-        "contents": """# Meridian Health - Network Topology
+        "contents": """# LakeLink Fiber - Network Topology
 
 ## Circuits
-- **CKT-44521:** Primary MPLS, Main Campus (Chicago) to DR Site (Aurora). 1 Gbps. CRITICAL - connects EMR to disaster recovery.
-- **CKT-44522:** Secondary MPLS, Main Campus to Branch Clinic Network. 500 Mbps.
+- **CKT-44521:** Primary MPLS, Main Campus (Chicago) to DR Site (Aurora). 1 Gbps. CRITICAL - connects OSS/BSS to disaster recovery.
+- **CKT-44522:** Secondary MPLS, Main Campus to Regional Distribution Ring. 500 Mbps.
 - **CKT-44530:** DIA, Main Campus internet access. 2 Gbps.
 - **CKT-44531:** Cloud Connect, Main Campus to AWS us-east-2. 1 Gbps. Hosts cloud-based analytics.
 
 ## Known Vulnerabilities
 - CKT-44521 traverses splice point SP-4421 (Naperville CO) — previously failed 2026-08-12.
-- No physical redundancy on the DR link (CKT-44521). If it fails, EMR runs on local cache only.
+- No physical redundancy on the DR link (CKT-44521). If it fails, OSS/BSS runs on local cache only.
 - Cloud Connect (CKT-44531) has no failover path to a secondary cloud region.""",
-        "description": "Meridian Health network topology, circuits, and known vulnerabilities"
+        "description": "LakeLink Fiber network topology, circuits, and known vulnerabilities"
     }
 ]
 
 for entry in cust001_entries:
-    result = create_entry("customer-CUST-001", entry["path"], entry["contents"], entry["description"])
+    result = create_entry(CUSTOMER_SCOPE, entry["path"], entry["contents"], entry["description"])
     status = "OK" if result else "FAILED"
-    print(f"  [{status}] customer-CUST-001{entry['path']}")
+    print(f"  [{status}] {CUSTOMER_SCOPE}{entry['path']}")
 
-print(f"\nSeeded {len(cust001_entries)} entries in customer-CUST-001 scope")
+print(f"\nSeeded {len(cust001_entries)} entries in {CUSTOMER_SCOPE} scope")
 
 # COMMAND ----------
 
@@ -382,7 +396,7 @@ ticket_entries = [
 - **Affected Service:** MPLS
 - **Affected Circuit:** CKT-44521
 - **Region:** Midwest
-- **Customer:** Meridian Health Systems (CUST-001, Platinum SLA)
+- **Customer:** LakeLink Fiber (CUST-001, Platinum SLA)
 - **SLA Response Deadline:** 2026-09-15T14:38:00Z (15 minutes from creation)
 - **SLA Restore Deadline:** 2026-09-15T18:23:00Z (4 hours from creation)
 
@@ -416,17 +430,17 @@ ticket_entries = [
 ]
 
 for entry in ticket_entries:
-    result = create_entry("ticket-INC-30142", entry["path"], entry["contents"], entry["description"])
+    result = create_entry(TICKET_SCOPE, entry["path"], entry["contents"], entry["description"])
     status = "OK" if result else "FAILED"
-    print(f"  [{status}] ticket-INC-30142{entry['path']}")
+    print(f"  [{status}] {TICKET_SCOPE}{entry['path']}")
 
-print(f"\nSeeded {len(ticket_entries)} entries in ticket-INC-30142 scope")
+print(f"\nSeeded {len(ticket_entries)} entries in {TICKET_SCOPE} scope")
 
 # COMMAND ----------
 
 # DBTITLE 1,Verify: Search memory entries
 # Verify memory store by searching each scope
-for scope in ["lumen-org", "lumen-playbooks", "customer-CUST-001", "ticket-INC-30142"]:
+for scope in [ORG_SCOPE, PLAYBOOK_SCOPE, CUSTOMER_SCOPE, TICKET_SCOPE]:
     result = memory_api(
         "POST",
         f"memory-stores/{FULL_STORE_NAME}/entries:search",

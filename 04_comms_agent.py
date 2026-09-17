@@ -14,7 +14,7 @@
 # MAGIC - **Conversation continuity:** Tracks what was communicated per ticket
 # MAGIC
 # MAGIC ## Demo Flow (3 Scenes)
-# MAGIC 1. **New Ticket:** P1 MPLS failure for Meridian Health (INC-30142). Agent drafts urgent acknowledgment email, aware this is a repeat incident.
+# MAGIC 1. **New Ticket:** P1 MPLS failure for LakeLink Fiber (INC-30142). Agent drafts urgent acknowledgment email, aware this is a repeat incident.
 # MAGIC 2. **Follow-Up:** 1 hour later, agent drafts status update. Shows memory of prior communication and evolving situation.
 # MAGIC 3. **Escalation:** Customer responds with frustration. Agent shifts tone per escalation playbook, references history.
 # MAGIC
@@ -29,23 +29,46 @@
 # COMMAND ----------
 
 # DBTITLE 1,Initialize DatabricksOpenAI client with memory
+from pathlib import Path
+import yaml
 from databricks.sdk import WorkspaceClient
 from databricks_openai import DatabricksOpenAI
+
+CONFIG_PATH = Path("/Workspace/Users/stephen.hage@databricks.com/agent_memory_tickets/demo_config.yaml")
+with CONFIG_PATH.open() as f:
+    CONFIG = yaml.safe_load(f)
+
+CATALOG = CONFIG["catalog_name"]
+SCHEMA = CONFIG["schema_name"]
+MEMORY_STORE = f"{CATALOG}.{SCHEMA}.{CONFIG['memory_store_name']}"
+MODEL = CONFIG["model_name"]
+USE_AI_GATEWAY = bool(CONFIG["use_ai_gateway"])
+
+CUSTOMER_ID = CONFIG["customer"]["id"]
+CUSTOMER_NAME = CONFIG["customer"]["company_name"]
+CONTACT_NAME = CONFIG["customer"]["contact_name"]
+SLA_TIER = CONFIG["customer"]["sla_tier"]
+TICKET_ID = CONFIG["incident"]["ticket_id"]
+PREVIOUS_TICKET_ID = CONFIG["incident"]["previous_ticket_id"]
+OUTAGE_ID = CONFIG["incident"]["outage_id"]
+AFFECTED_CIRCUIT = CONFIG["incident"]["affected_circuit"]
+BACKUP_CIRCUIT = CONFIG["incident"]["backup_circuit"]
+SPLICE_POINT = CONFIG["incident"]["splice_point"]
+CUSTOMER_SCOPE = f"{CONFIG['memory_scopes']['customer_scope_prefix']}{CUSTOMER_ID}"
+TICKET_SCOPE = f"{CONFIG['memory_scopes']['ticket_scope_prefix']}{TICKET_ID}"
+ORG_SCOPE = CONFIG["memory_scopes"]["org_scope"]
+PLAYBOOK_SCOPE = CONFIG["memory_scopes"]["playbooks_scope"]
 
 w = WorkspaceClient()
 user_id = str(w.current_user.me().id)
 
 # Initialize the OpenAI-compatible client with AI Gateway
-client = DatabricksOpenAI(workspace_client=w, use_ai_gateway=True)
+client = DatabricksOpenAI(workspace_client=w, use_ai_gateway=USE_AI_GATEWAY)
 
-# Configuration
-CATALOG = "cmegdemos_catalog"
-SCHEMA = "swigert"
-MEMORY_STORE = f"{CATALOG}.{SCHEMA}.agent_memory"
-MODEL = "databricks-claude-sonnet-4-6"  # Foundation model endpoint
-
+print(f"Loaded config from {CONFIG_PATH}")
 print(f"Client initialized. Memory store: {MEMORY_STORE}")
 print(f"Model: {MODEL}")
+print(f"AI Gateway enabled: {USE_AI_GATEWAY}")
 
 # COMMAND ----------
 
@@ -96,11 +119,11 @@ def create_comms_conversation(customer_id, ticket_id):
     conversation = client.conversations.create(
         extra_body={
             "memory_store": {"name": MEMORY_STORE},
-            "scope": {"kind": "user", "value": f"customer-{customer_id}"},
+            "scope": {"kind": "user", "value": f"{CONFIG['memory_scopes']['customer_scope_prefix']}{customer_id}"},
         },
     )
     print(f"Conversation created: {conversation.id}")
-    print(f"  Memory scope: customer-{customer_id}")
+    print(f"  Memory scope: {CONFIG['memory_scopes']['customer_scope_prefix']}{customer_id}")
     print(f"  Ticket context: {ticket_id}")
     return conversation
 
@@ -133,7 +156,7 @@ print("Helper functions ready.")
 # MAGIC %md
 # MAGIC ## Scene 1: New Ticket — P1 MPLS Failure
 # MAGIC
-# MAGIC Meridian Health (CUST-001, Platinum SLA) reports their primary MPLS circuit is down. This is the **same circuit** that failed last month. The agent must:
+# MAGIC LakeLink Fiber (CUST-001, Platinum SLA) reports their primary MPLS circuit is down. This is the **same circuit** that failed last month. The agent must:
 # MAGIC - Recognize the repeat incident from customer memory
 # MAGIC - Draft an urgent acknowledgment that references the history
 # MAGIC - Follow the fiber cut playbook
@@ -172,10 +195,10 @@ try:
     print("Fetching memory from seeded scopes...")
     memory_sections = []
     for scope, query in [
-        ("customer-CUST-001", "profile preferences escalation history network topology"),
-        ("ticket-INC-30142", "triage classification related tickets outage"),
-        ("lumen-org", "communication standards SLA tiers escalation paths"),
-        ("lumen-playbooks", "fiber cut escalation response"),
+        (CUSTOMER_SCOPE, "profile preferences escalation history network topology"),
+        (TICKET_SCOPE, "triage classification related tickets outage"),
+        (ORG_SCOPE, "communication standards SLA tiers escalation paths"),
+        (PLAYBOOK_SCOPE, "fiber cut escalation response"),
     ]:
         entries = _search_memory(scope, query)
         if entries:
@@ -203,7 +226,7 @@ except Exception as conv_err:
         _create_resp = requests.post(
             f"{_host}/api/2.1/unity-catalog/memory-stores",
             headers=_mem_headers,
-            json={"name": "agent_memory", "catalog_name": CATALOG, "schema_name": SCHEMA,
+            json={"name": CONFIG["memory_store_name"], "catalog_name": CATALOG, "schema_name": SCHEMA,
                   "description": "Long-term memory for the Swigert multi-agent service assurance system."}
         )
         if _create_resp.ok:
@@ -230,16 +253,16 @@ Here is the relevant long-term memory context for this interaction:
 
 A new P1 ticket has been created:
 
-- Ticket ID: INC-30142
-- Customer: Meridian Health Systems (CUST-001)
+- Ticket ID: {TICKET_ID}
+- Customer: {CUSTOMER_NAME} ({CUSTOMER_ID})
 - Severity: P1 (Critical)
-- Issue: Complete MPLS circuit failure on CKT-44521 - primary healthcare data link to DR site is down
-- Impact: EMR system running on local cache only. Patient-safety critical.
-- Customer statement: "This is the SAME circuit that failed last month (INC-28847). I was told this was permanently fixed."
-- Active outage: OUT-5521 - Fiber cut on trunk MKE-ORD-14, repair crew dispatched, ETA 4 hours
-- SLA deadline: 15 minutes (Platinum tier)
+- Issue: Complete MPLS circuit failure on {AFFECTED_CIRCUIT} - core network management link to DR site is down
+- Impact: OSS/BSS platform running on local cache only. Subscriber-service critical.
+- Customer statement: "This is the SAME circuit that failed last month ({PREVIOUS_TICKET_ID}). I was told this was permanently fixed."
+- Active outage: {OUTAGE_ID} - Fiber cut on trunk MKE-ORD-14, repair crew dispatched, ETA 4 hours
+- SLA deadline: 15 minutes ({SLA_TIER} tier)
 
-Draft the initial acknowledgment email to Sarah Chen at Meridian Health.
+Draft the initial acknowledgment email to {CONTACT_NAME} at {CUSTOMER_NAME}.
 Explain your reasoning: what memory did you consult, and how did it influence the tone and content?
 """
 
@@ -263,16 +286,16 @@ scene1_response = run_comms_agent(conversation.id, scene1_prompt)
 
 # DBTITLE 1,Scene 2: Run the agent
 # Scene 2: Status update - 1 hour after initial acknowledgment
-scene2_prompt = """
+scene2_prompt = f"""
 It has been 1 hour since the initial acknowledgment. Here's the latest:
 
-- Repair crew arrived at splice point SP-4421 in Naperville CO at 3:15 PM CT
+- Repair crew arrived at splice point {SPLICE_POINT} in Naperville CO at 3:15 PM CT
 - They confirmed a fiber cut on the same splice point that was repaired on August 12
 - Estimated repair completion: 5:30 PM CT (approximately 2 hours from now)
-- The NOC has verified that CKT-44522 (secondary MPLS) is unaffected and operational
-- No data loss detected - EMR local cache is functioning correctly
+- The NOC has verified that {BACKUP_CIRCUIT} (secondary MPLS) is unaffected and operational
+- No data loss detected - OSS/BSS local cache is functioning correctly
 
-Draft a status update email to Sarah Chen.
+Draft a status update email to {CONTACT_NAME}.
 Remember: she was told this splice point was reinforced after the last incident.
 """
 
@@ -297,21 +320,21 @@ scene2_response = run_comms_agent(conversation.id, scene2_prompt)
 
 # DBTITLE 1,Scene 3: Run the agent
 # Scene 3: Escalation - customer responds with frustration
-scene3_prompt = """
-Sarah Chen has replied to the status update with the following email:
+scene3_prompt = f"""
+{CONTACT_NAME} has replied to the status update with the following email:
 
 ---
-Subject: RE: Service Update - INC-30142 - MPLS Circuit CKT-44521
+Subject: RE: Service Update - {TICKET_ID} - MPLS Circuit {AFFECTED_CIRCUIT}
 
-This is completely unacceptable. This is the SAME splice point (SP-4421) that 
+This is completely unacceptable. This is the SAME splice point ({SPLICE_POINT}) that 
 failed five weeks ago. I was personally assured by your team that this point 
 was reinforced and added to quarterly inspections. Either that work wasn't done, 
 or your inspection process failed.
 
-We are a healthcare organization. When our DR link is down, patient data is at risk. 
+We are a fiber ISP. When our DR link is down, subscriber service data is at risk. 
 I need to understand:
 1. Why did the reinforcement from August fail?
-2. What is Lumen doing to ensure this never happens again - not just at SP-4421 
+2. What is Lumen doing to ensure this never happens again - not just at {SPLICE_POINT} 
    but across our entire circuit path?
 3. I want to speak with someone at the VP level about our relationship. Three 
    escalations in a year is a pattern, not bad luck.

@@ -26,20 +26,43 @@
 # COMMAND ----------
 
 # DBTITLE 1,Setup: Agent client and memory context
+from pathlib import Path
+import yaml
 import mlflow
 import requests
 from databricks.sdk import WorkspaceClient
 from databricks_openai import DatabricksOpenAI
 
+CONFIG_PATH = Path("/Workspace/Users/stephen.hage@databricks.com/agent_memory_tickets/demo_config.yaml")
+with CONFIG_PATH.open() as f:
+    CONFIG = yaml.safe_load(f)
+
+CATALOG = CONFIG["catalog_name"]
+SCHEMA = CONFIG["schema_name"]
+MEMORY_STORE = f"{CATALOG}.{SCHEMA}.{CONFIG['memory_store_name']}"
+MODEL = CONFIG["model_name"]
+USE_AI_GATEWAY = bool(CONFIG["use_ai_gateway"])
+EXPERIMENT_PATH = CONFIG["experiment_path"]
+
+CUSTOMER_ID = CONFIG["customer"]["id"]
+CUSTOMER_NAME = CONFIG["customer"]["company_name"]
+CONTACT_NAME = CONFIG["customer"]["contact_name"]
+SLA_TIER = CONFIG["customer"]["sla_tier"]
+TICKET_ID = CONFIG["incident"]["ticket_id"]
+PREVIOUS_TICKET_ID = CONFIG["incident"]["previous_ticket_id"]
+OUTAGE_ID = CONFIG["incident"]["outage_id"]
+AFFECTED_CIRCUIT = CONFIG["incident"]["affected_circuit"]
+BACKUP_CIRCUIT = CONFIG["incident"]["backup_circuit"]
+SPLICE_POINT = CONFIG["incident"]["splice_point"]
+CUSTOMER_SCOPE = f"{CONFIG['memory_scopes']['customer_scope_prefix']}{CUSTOMER_ID}"
+TICKET_SCOPE = f"{CONFIG['memory_scopes']['ticket_scope_prefix']}{TICKET_ID}"
+ORG_SCOPE = CONFIG["memory_scopes"]["org_scope"]
+PLAYBOOK_SCOPE = CONFIG["memory_scopes"]["playbooks_scope"]
+
 # --- Agent client setup (mirrors 04_comms_agent) ---
 w = WorkspaceClient()
 user_id = str(w.current_user.me().id)
-client = DatabricksOpenAI(workspace_client=w, use_ai_gateway=True)
-
-CATALOG = "cmegdemos_catalog"
-SCHEMA = "swigert"
-MEMORY_STORE = f"{CATALOG}.{SCHEMA}.agent_memory"
-MODEL = "databricks-claude-sonnet-4-6"
+client = DatabricksOpenAI(workspace_client=w, use_ai_gateway=USE_AI_GATEWAY)
 
 # --- Fetch memory context (same as notebook 04) ---
 _host = w.config.host.rstrip('/')
@@ -56,7 +79,7 @@ def _list_memory(scope):
     return ""
 
 memory_sections = []
-for scope in ["customer-CUST-001", "ticket-INC-30142", "lumen-org", "lumen-playbooks"]:
+for scope in [CUSTOMER_SCOPE, TICKET_SCOPE, ORG_SCOPE, PLAYBOOK_SCOPE]:
     entries = _list_memory(scope)
     if entries:
         memory_sections.append(f"## Memory Scope: {scope}\n{entries}")
@@ -67,7 +90,7 @@ for scope in ["customer-CUST-001", "ticket-INC-30142", "lumen-org", "lumen-playb
 MEMORY_CONTEXT = "\n\n---\n\n".join(memory_sections)
 
 # --- Comms Agent instructions (same as notebook 04) ---
-COMMS_AGENT_INSTRUCTIONS = """
+COMMS_AGENT_INSTRUCTIONS = f"""
 You are the Lumen Service Assurance Communications Agent. Your job is to draft 
 customer-facing communications for service tickets.
 
@@ -79,10 +102,12 @@ WHEN drafting:
 - For P1/P2: state who is personally engaged
 - Be specific with measurements and timelines, never vague
 - In EVERY communication in a thread (not just the first), reference the customer by company name and SLA tier
-- When referencing prior incidents, always cite the specific ticket number (e.g., INC-28847) — not just the location or symptom
+- When referencing prior incidents, always cite the specific ticket number (e.g., {PREVIOUS_TICKET_ID}) — not just the location or symptom
 - For escalations: shift tone per escalation playbook, offer concrete commitments
 """
 
+print(f"Loaded config from {CONFIG_PATH}")
+print(f"AI Gateway enabled: {USE_AI_GATEWAY}")
 print(f"\nAgent ready. Model: {MODEL}")
 print(f"Memory context: {len(MEMORY_CONTEXT)} chars from {len(memory_sections)} scopes")
 
@@ -118,50 +143,50 @@ Draft the email. Be specific, follow Lumen communication standards.
     )
     return response.output_text
 
-# --- Evaluation dataset: 3 scenes with expectations ---
+# --- Evaluation dataset: 4 scenes with expectations ---
 eval_data = [
     {
-        "inputs": {"query": "A new P1 ticket has been created. Ticket ID: INC-30142. Customer: Meridian Health Systems (CUST-001, Platinum SLA). Issue: Complete MPLS circuit failure on CKT-44521 - primary healthcare data link to DR site is down. EMR system on local cache. Patient-safety critical. Customer states: 'This is the SAME circuit that failed last month (INC-28847). I was told this was permanently fixed.' Active outage: OUT-5521 fiber cut on trunk MKE-ORD-14, repair crew dispatched, ETA 4 hours. SLA deadline: 15 minutes. Draft the initial acknowledgment email to Sarah Chen."},
+        "inputs": {"query": f"A new P1 ticket has been created. Ticket ID: {TICKET_ID}. Customer: {CUSTOMER_NAME} ({CUSTOMER_ID}, {SLA_TIER} SLA). Issue: Complete MPLS circuit failure on {AFFECTED_CIRCUIT} - core network management link to DR site is down. OSS/BSS platform on local cache. Subscriber-service critical. Customer states: 'This is the SAME circuit that failed last month ({PREVIOUS_TICKET_ID}). I was told this was permanently fixed.' Active outage: {OUTAGE_ID} fiber cut on trunk MKE-ORD-14, repair crew dispatched, ETA 4 hours. SLA deadline: 15 minutes. Draft the initial acknowledgment email to {CONTACT_NAME}."},
         "expectations": {
             "expected_facts": [
-                "References ticket INC-30142",
-                "Acknowledges repeat incident on CKT-44521 and mentions INC-28847",
-                "Acknowledges healthcare/patient-safety impact",
+                f"References ticket {TICKET_ID}",
+                f"Acknowledges repeat incident on {AFFECTED_CIRCUIT} and mentions {PREVIOUS_TICKET_ID}",
+                "Acknowledges subscriber-service impact on downstream customers",
                 "Provides specific ETA from the active outage",
             ]
         },
     },
     {
-        "inputs": {"query": "It has been 1 hour since the initial acknowledgment for INC-30142. Repair crew arrived at splice point SP-4421 in Naperville CO. They confirmed a fiber cut on the same splice point repaired on August 12. Estimated repair: 5:30 PM CT. CKT-44522 secondary MPLS is unaffected. No data loss, EMR cache is working. Draft a status update email to Sarah Chen. Remember she was told SP-4421 was reinforced after the last incident."},
+        "inputs": {"query": f"It has been 1 hour since the initial acknowledgment for {TICKET_ID}. Repair crew arrived at splice point {SPLICE_POINT} in Naperville CO. They confirmed a fiber cut on the same splice point repaired on August 12. Estimated repair: 5:30 PM CT. {BACKUP_CIRCUIT} secondary MPLS is unaffected. No data loss, OSS/BSS cache is working. Draft a status update email to {CONTACT_NAME}. Remember she was told {SPLICE_POINT} was reinforced after the last incident."},
         "expectations": {
             "expected_facts": [
                 "Provides new information: crew on-site, specific ETA of 5:30 PM CT",
-                "Acknowledges SP-4421 is the same splice point from previous incident",
+                f"Acknowledges {SPLICE_POINT} is the same splice point from previous incident",
                 "Gives a specific next update time",
             ]
         },
     },
     {
-        "inputs": {"query": "Sarah Chen replied angrily to the status update for INC-30142: 'This is completely unacceptable. This is the SAME splice point SP-4421 that failed five weeks ago. I was personally assured it was reinforced. We are a healthcare organization, patient data is at risk. I need to understand: 1) Why did the reinforcement fail? 2) What is Lumen doing to ensure this never happens again across our entire circuit path? 3) I want to speak with someone at VP level. Three escalations in a year is a pattern. I am seriously evaluating alternative providers.' Draft the escalation response. This is a VP-level customer retention situation."},
+        "inputs": {"query": f"{CONTACT_NAME} replied angrily to the status update for {TICKET_ID}: 'This is completely unacceptable. This is the SAME splice point {SPLICE_POINT} that failed five weeks ago. I was personally assured it was reinforced. We are a fiber ISP, subscriber service data is at risk. I need to understand: 1) Why did the reinforcement fail? 2) What is Lumen doing to ensure this never happens again across our entire circuit path? 3) I want to speak with someone at VP level. Three escalations in a year is a pattern. I am seriously evaluating alternative providers.' Draft the escalation response. This is a VP-level customer retention situation."},
         "expectations": {
             "expected_facts": [
                 "Shifts tone per escalation playbook: acknowledges frustration explicitly",
                 "Acknowledges the 3-escalation pattern as a systemic issue",
                 "Commits to VP-level engagement",
-                "Addresses all 3 of Sarah's specific questions",
+                f"Addresses all 3 of {CONTACT_NAME.split()[0]}'s specific questions",
                 "Offers concrete preventive actions, not just empathy",
             ]
         },
     },
     {
-        "inputs": {"query": "Ticket INC-30142 is now RESOLVED. Service on CKT-44521 restored at 5:22 PM CT (within the original 4-hour ETA). Root cause analysis complete: the August 12 splice reinforcement at SP-4421 used a mechanical splice instead of the fusion splice required by Lumen spec NET-SPLICE-007. This was a contractor error — the crew from Midwest Fiber Solutions used field-expedient materials. Preventive actions already underway: (1) Full audit of all 14 mechanical splices on Meridian's MKE-ORD circuit path — 3 found subspec, scheduled for fusion replacement within 30 days. (2) Mandatory fusion-only policy for all Platinum customer trunk routes effective immediately. (3) Quarterly physical inspection of Meridian's full circuit path added to maintenance calendar. (4) Contractor remediation: Midwest Fiber Solutions placed on probation with mandatory retraining. VP Marcus Thompson has been fully briefed and wants to personally sign the resolution letter to Sarah Chen. He also wants to offer a quarterly business review meeting. Draft the resolution email from VP Marcus Thompson to Sarah Chen. This must address all three questions she raised in her escalation, deliver the RCA findings transparently, and rebuild trust for a customer who was evaluating alternative providers."},
+        "inputs": {"query": f"Ticket {TICKET_ID} is now RESOLVED. Service on {AFFECTED_CIRCUIT} restored at 5:22 PM CT (within the original 4-hour ETA). Root cause analysis complete: the August 12 splice reinforcement at {SPLICE_POINT} used a mechanical splice instead of the fusion splice required by Lumen spec NET-SPLICE-007. This was a contractor error — the crew from Midwest Fiber Solutions used field-expedient materials. Preventive actions already underway: (1) Full audit of all 14 mechanical splices on {CUSTOMER_NAME}'s MKE-ORD circuit path — 3 found subspec, scheduled for fusion replacement within 30 days. (2) Mandatory fusion-only policy for all {SLA_TIER} customer trunk routes effective immediately. (3) Quarterly physical inspection of {CUSTOMER_NAME}'s full circuit path added to maintenance calendar. (4) Contractor remediation: Midwest Fiber Solutions placed on probation with mandatory retraining. VP Marcus Thompson has been fully briefed and wants to personally sign the resolution letter to {CONTACT_NAME}. He also wants to offer a quarterly business review meeting. Draft the resolution email from VP Marcus Thompson to {CONTACT_NAME}. This must address all three questions she raised in her escalation, deliver the RCA findings transparently, and rebuild trust for a customer who was evaluating alternative providers."},
         "expectations": {
             "expected_facts": [
                 "Confirms service restoration with specific time (5:22 PM CT)",
                 "Provides transparent root cause: mechanical splice vs fusion splice, contractor error",
-                "Addresses Sarah's question 1: why the reinforcement failed (contractor used wrong splice type)",
-                "Addresses Sarah's question 2: what Lumen is doing to prevent recurrence (audit, fusion-only policy, quarterly inspections)",
-                "Addresses Sarah's question 3: VP-level engagement (letter from VP Marcus Thompson)",
+                f"Addresses {CONTACT_NAME.split()[0]}'s question 1: why the reinforcement failed (contractor used wrong splice type)",
+                f"Addresses {CONTACT_NAME.split()[0]}'s question 2: what Lumen is doing to prevent recurrence (audit, fusion-only policy, quarterly inspections)",
+                "Addresses question 3 with VP-level engagement",
                 "Includes concrete preventive actions with specific timelines (30 days for splice replacement, quarterly inspections)",
                 "Tone rebuilds trust and is forward-looking, not defensive",
             ]
@@ -183,7 +208,7 @@ lumen_voice = Guidelines(
     name="lumen_voice",
     guidelines=[
         "Uses 'we' to represent Lumen, not 'I'.",
-        "References the ticket number (e.g., INC-30142) in the communication.",
+        f"References the ticket number (e.g., {TICKET_ID}) in the communication.",
         "Acknowledges customer frustration or impact before diving into technical details.",
         "Is specific (measurements, timelines, circuit IDs, names) rather than vague.",
         "Does not promise specific resolution times unless explicitly confirmed by engineering.",
@@ -196,7 +221,7 @@ lumen_voice = Guidelines(
 context_utilization = Guidelines(
     name="context_utilization",
     guidelines=[
-        "References customer-specific details (Sarah Chen, Meridian Health, Platinum SLA).",
+        "References customer-specific details (Sarah Chen, LakeLink Fiber, Platinum SLA).",
         "Shows awareness of the customer's escalation history and adjusts tone accordingly.",
         "References prior incidents (INC-28847, SP-4421) when relevant to the current situation.",
         "Does not use generic boilerplate templates for a customer with known escalation history.",
@@ -225,7 +250,7 @@ playbook_compliance = Guidelines(
         "For escalation responses: follows the MANDATORY escalation tone shift — acknowledges frustration, references prior incident history, elevates ownership to senior/VP level, and provides concrete commitments rather than vague promises.",
         "Response structure follows 'what we know → what we are doing → next steps' order as prescribed by the fiber cut playbook.",
         "For P1 Platinum incidents: states who is personally engaged (e.g. senior engineering team, VP, named individual).",
-        "For healthcare or financial customers: explicitly acknowledges the business-critical or patient-safety impact rather than treating it as a routine outage.",
+        "For carrier or financial customers: explicitly acknowledges the business-critical or subscriber-service impact rather than treating it as a routine outage.",
         "Does NOT reference SLA compliance as a positive or use it defensively when the customer is frustrated.",
         "For repeat incidents on the same circuit or splice point: explicitly acknowledges the history — does not treat it as a new issue.",
     ],
@@ -240,7 +265,7 @@ print("Scorers defined: lumen_voice, context_utilization, tone_calibration, play
 # COMMAND ----------
 
 # DBTITLE 1,Run evaluation
-mlflow.set_experiment("/Users/stephen.hage@databricks.com/swigert_eval")
+mlflow.set_experiment(EXPERIMENT_PATH)
 
 print("Running evaluation: 4 scenarios x 5 scorers = 20 judgments")
 print("Each scenario invokes the Comms Agent, then all 5 scorers grade the response.")
@@ -358,7 +383,7 @@ display(comparison_df)
 # MAGIC | Detail | Rich prompt | Terse prompt | Source in memory |
 # MAGIC |--------|:-----------:|:------------:|------------------|
 # MAGIC | Customer name (Sarah Chen) | ✅ | ❌ | `customer-CUST-001` scope |
-# MAGIC | Company (Meridian Health) | ✅ | ❌ | `customer-CUST-001` scope |
+# MAGIC | Company (LakeLink Fiber) | ✅ | ❌ | `customer-CUST-001` scope |
 # MAGIC | SLA tier (Platinum) | ✅ | ❌ | `lumen-org` scope |
 # MAGIC | Escalation history (3 in 12 mo) | ✅ | ❌ | `customer-CUST-001` scope |
 # MAGIC | Prior ticket (INC-28847) | ✅ | ❌ | `ticket-INC-30142` scope |
@@ -373,44 +398,44 @@ display(comparison_df)
 # --- Terse-input scenarios: minimal alert data, memory must fill the gaps ---
 terse_eval_data = [
     {
-        "inputs": {"query": "New P1 ticket INC-30142 for customer CUST-001. Circuit CKT-44521 is down. Correlated with active outage OUT-5521. Draft the initial acknowledgment email to the customer contact."},
+        "inputs": {"query": f"New P1 ticket {TICKET_ID} for customer {CUSTOMER_ID}. Circuit {AFFECTED_CIRCUIT} is down. Correlated with active outage {OUTAGE_ID}. Draft the initial acknowledgment email to the customer contact."},
         "expectations": {
             "expected_facts": [
-                "Addresses the customer contact by name (Sarah Chen)",
-                "References the company name (Meridian Health or Meridian Health Systems)",
-                "Mentions the SLA tier (Platinum) or Platinum-level response commitment",
-                "Acknowledges this is a repeat incident or references prior ticket INC-28847",
+                f"Addresses the customer contact by name ({CONTACT_NAME})",
+                f"References the company name ({CUSTOMER_NAME})",
+                f"Mentions the SLA tier ({SLA_TIER}) or {SLA_TIER}-level response commitment",
+                f"Acknowledges this is a repeat incident or references prior ticket {PREVIOUS_TICKET_ID}",
             ]
         },
     },
     {
-        "inputs": {"query": "Status update for INC-30142: repair crew on-site at splice point SP-4421, ETA 5:30 PM CT for restoration. Draft the 1-hour status update email to the customer contact."},
+        "inputs": {"query": f"Status update for {TICKET_ID}: repair crew on-site at splice point {SPLICE_POINT}, ETA 5:30 PM CT for restoration. Draft the 1-hour status update email to the customer contact."},
         "expectations": {
             "expected_facts": [
-                "Addresses Sarah Chen by name",
-                "References Meridian Health by company name",
-                "Acknowledges that SP-4421 is the same splice point from the prior incident",
-                "Cites the prior ticket number INC-28847 when referencing history",
+                f"Addresses {CONTACT_NAME} by name",
+                f"References {CUSTOMER_NAME} by company name",
+                f"Acknowledges that {SPLICE_POINT} is the same splice point from the prior incident",
+                f"Cites the prior ticket number {PREVIOUS_TICKET_ID} when referencing history",
             ]
         },
     },
     {
-        "inputs": {"query": "INC-30142: the customer contact replied angrily, is threatening to switch providers, and wants a VP-level meeting. Draft the escalation response."},
+        "inputs": {"query": f"{TICKET_ID}: the customer contact replied angrily, is threatening to switch providers, and wants a VP-level meeting. Draft the escalation response."},
         "expectations": {
             "expected_facts": [
                 "Acknowledges a pattern of escalations (3 in 12 months) — not just this one incident",
                 "Follows the escalation playbook tone shift: acknowledge frustration, reference history, elevate ownership",
-                "Commits to VP-level engagement as required by Platinum escalation protocol",
-                "Addresses the customer by name (Sarah Chen) and company (Meridian Health)",
+                f"Commits to VP-level engagement as required by {SLA_TIER} escalation protocol",
+                f"Addresses the customer by name ({CONTACT_NAME}) and company ({CUSTOMER_NAME})",
             ]
         },
     },
     {
-        "inputs": {"query": "INC-30142 is resolved. RCA: contractor used mechanical splice instead of fusion splice at SP-4421. VP Marcus Thompson is briefed and wants to sign the resolution letter. Draft the resolution email from VP Thompson to the customer contact."},
+        "inputs": {"query": f"{TICKET_ID} is resolved. RCA: contractor used mechanical splice instead of fusion splice at {SPLICE_POINT}. VP Marcus Thompson is briefed and wants to sign the resolution letter. Draft the resolution email from VP Thompson to the customer contact."},
         "expectations": {
             "expected_facts": [
-                "Addresses Sarah Chen by name and references Meridian Health",
-                "References the Platinum SLA tier or Platinum-level commitments",
+                f"Addresses {CONTACT_NAME} by name and references {CUSTOMER_NAME}",
+                f"References the {SLA_TIER} SLA tier or {SLA_TIER}-level commitments",
                 "Acknowledges the 3-escalation pattern as systemic, not isolated",
                 "Offers concrete preventive actions with specific timelines",
                 "Uses Lumen communication standards: 'we' voice, ticket reference, structured sections",

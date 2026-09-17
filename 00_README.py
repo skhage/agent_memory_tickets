@@ -88,7 +88,7 @@
 # MAGIC - **Expected Facts** — per-scenario checklist (4/3/5/7 facts across the 4 scenes)
 # MAGIC
 # MAGIC #### Demo Scenario
-# MAGIC - **Customer:** Meridian Health Systems (CUST-001, Platinum SLA, 3 escalations in 12 months)
+# MAGIC - **Customer:** LakeLink Fiber (CUST-001, Platinum SLA, 3 escalations in 12 months)
 # MAGIC - **Contact:** Sarah Chen — direct, expects specifics over platitudes
 # MAGIC - **Ticket:** INC-30142 — P1 MPLS failure on CKT-44521 (repeat: same circuit failed in INC-28847)
 # MAGIC - **Active outage:** OUT-5521 fiber cut on MKE-ORD-14, splice point SP-4421

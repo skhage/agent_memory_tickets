@@ -15,6 +15,32 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Load shared YAML config
+from pathlib import Path
+import yaml
+
+CONFIG_PATH = Path("/Workspace/Users/stephen.hage@databricks.com/agent_memory_tickets/demo_config.yaml")
+with CONFIG_PATH.open() as f:
+    CONFIG = yaml.safe_load(f)
+
+CATALOG = CONFIG["catalog_name"]
+SCHEMA = CONFIG["schema_name"]
+
+spark.sql(f"USE CATALOG `{CATALOG}`")
+spark.sql(f"USE SCHEMA `{SCHEMA}`")
+
+print(f"Loaded config from {CONFIG_PATH}")
+print(f"Catalog: {CATALOG}")
+print(f"Schema: {SCHEMA}")
+
+# COMMAND ----------
+
+# DBTITLE 1,Verify catalog context
+# MAGIC %sql
+# MAGIC SELECT current_catalog() AS catalog_name, current_schema() AS schema_name;
+
+# COMMAND ----------
+
 # DBTITLE 1,Set catalog context
 # MAGIC %sql
 # MAGIC USE CATALOG cmegdemos_catalog;

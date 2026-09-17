@@ -1,0 +1,28 @@
+project_name: swigert_service_assurance
+catalog_name: cmegdemos_catalog
+schema_name: swigert
+memory_store_name: agent_memory
+model_name: databricks-claude-sonnet-4-6
+use_ai_gateway: true
+experiment_path: /Users/stephen.hage@databricks.com/swigert_eval
+
+customer:
+  id: CUST-001
+  company_name: LakeLink Fiber
+  sla_tier: Platinum
+  contact_name: Sarah Chen
+  contact_email: sarah.chen@lakelinkfiber.com
+
+incident:
+  ticket_id: INC-30142
+  previous_ticket_id: INC-28847
+  outage_id: OUT-5521
+  affected_circuit: CKT-44521
+  backup_circuit: CKT-44522
+  splice_point: SP-4421
+
+memory_scopes:
+  customer_scope_prefix: customer-
+  ticket_scope_prefix: ticket-
+  org_scope: lumen-org
+  playbooks_scope: lumen-playbooks

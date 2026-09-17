@@ -18,6 +18,32 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Load shared YAML config
+from pathlib import Path
+import yaml
+
+CONFIG_PATH = Path("/Workspace/Users/stephen.hage@databricks.com/agent_memory_tickets/demo_config.yaml")
+with CONFIG_PATH.open() as f:
+    CONFIG = yaml.safe_load(f)
+
+CATALOG = CONFIG["catalog_name"]
+SCHEMA = CONFIG["schema_name"]
+
+spark.sql(f"USE CATALOG `{CATALOG}`")
+spark.sql(f"USE SCHEMA `{SCHEMA}`")
+
+print(f"Loaded config from {CONFIG_PATH}")
+print(f"Catalog: {CATALOG}")
+print(f"Schema: {SCHEMA}")
+
+# COMMAND ----------
+
+# DBTITLE 1,Verify catalog context
+# MAGIC %sql
+# MAGIC SELECT current_catalog() AS catalog_name, current_schema() AS schema_name;
+
+# COMMAND ----------
+
 # DBTITLE 1,Set catalog context
 # MAGIC %sql
 # MAGIC USE CATALOG cmegdemos_catalog;
@@ -65,9 +91,9 @@
 # MAGIC ) COMMENT 'Lumen enterprise customer profiles with SLA, contact, and network context';
 # MAGIC
 # MAGIC INSERT INTO customers VALUES
-# MAGIC   ('CUST-001', 'Meridian Health Systems', 'Platinum', 'Sarah Chen', 'sarah.chen@meridianhealth.com', '+1-312-555-0142', 'email', 'America/Chicago', 'James Rodriguez', 'Midwest',
+# MAGIC   ('CUST-001', 'LakeLink Fiber', 'Platinum', 'Sarah Chen', 'sarah.chen@lakelinkfiber.com', '+1-312-555-0142', 'email', 'America/Chicago', 'James Rodriguez', 'Midwest',
 # MAGIC    ARRAY('MPLS', 'DIA', 'SD-WAN', 'Voice', 'Cloud Connect'), ARRAY('CKT-44521', 'CKT-44522', 'CKT-44530', 'CKT-44531'), 3, 6.2,
-# MAGIC    'Critical healthcare customer. HIPAA-sensitive. 3 escalations in 12 months — relationship is fragile. Sarah is direct and expects specifics, not platitudes. Previous incident (INC-28847) took 6 hours to resolve; she was promised it would not recur.'),
+# MAGIC    'Critical fiber ISP customer. CPNI-sensitive. 3 escalations in 12 months — relationship is fragile. Sarah is direct and expects specifics, not platitudes. Previous incident (INC-28847) took 6 hours to resolve; she was promised it would not recur.'),
 # MAGIC   ('CUST-002', 'Apex Financial Group', 'Platinum', 'Michael Torres', 'mtorres@apexfinancial.com', '+1-212-555-0198', 'phone', 'America/New_York', 'Lisa Park', 'Northeast',
 # MAGIC    ARRAY('DIA', 'Cloud Connect', 'DDoS Mitigation', 'Voice'), ARRAY('CKT-33201', 'CKT-33202', 'CKT-33210'), 1, 8.5,
 # MAGIC    'Tier-1 financial services. Trading floor connectivity is business-critical — any latency impacts real dollars. Michael prefers phone for P1/P2. Extremely sensitive about market hours (9:30 AM - 4 PM ET). Previous P1 resolved in 2 hours — set a good precedent.'),
@@ -107,10 +133,10 @@
 # MAGIC ) COMMENT 'Service assurance tickets representing customer-reported issues';
 # MAGIC
 # MAGIC INSERT INTO tickets VALUES
-# MAGIC   -- Active ticket: P1 for Meridian Health (Platinum) - the main demo scenario
+# MAGIC   -- Active ticket: P1 for LakeLink Fiber (Platinum) - the main demo scenario
 # MAGIC   ('INC-30142', 'CUST-001', '2026-09-15T14:23:00Z', '2026-09-15T14:23:00Z',
-# MAGIC    'open', 'P1', 'Complete MPLS circuit failure - primary healthcare data link down',
-# MAGIC    'Our primary MPLS circuit CKT-44521 connecting our main hospital campus to our disaster recovery site went down at approximately 2:15 PM CT. We have lost connectivity to our DR environment and our EMR system is running on local cache only. This is patient-safety critical. We need immediate attention. This is the SAME circuit that failed last month (INC-28847). I was told this was permanently fixed.',
+# MAGIC    'open', 'P1', 'Complete MPLS circuit failure - primary network management link down',
+# MAGIC    'Our primary MPLS circuit CKT-44521 connecting our core POP to our disaster recovery site went down at approximately 2:15 PM CT. We have lost connectivity to our DR environment and our OSS/BSS platform is running on local cache only. This is subscriber-service critical. We need immediate attention. This is the SAME circuit that failed last month (INC-28847). I was told this was permanently fixed.',
 # MAGIC    'MPLS', 'CKT-44521', 'Midwest', NULL, '2026-09-15T14:38:00Z', NULL, NULL),
 # MAGIC
 # MAGIC   -- Active ticket: P2 for Apex Financial (Platinum)
@@ -125,10 +151,10 @@
 # MAGIC    'Our SD-WAN appliance at our SeaTac warehouse is not failing over to the secondary link when we simulate a primary failure. We discovered this during a routine DR test. Not impacting production currently but we need this resolved before our peak shipping season starts next week.',
 # MAGIC    'SD-WAN', 'CKT-55801', 'West', 'NOC-Engineer-2', '2026-09-15T11:00:00Z', NULL, NULL),
 # MAGIC
-# MAGIC   -- Resolved ticket for demo reference: previous Meridian incident
+# MAGIC   -- Resolved ticket for demo reference: previous LakeLink Fiber incident
 # MAGIC   ('INC-28847', 'CUST-001', '2026-08-12T09:15:00Z', '2026-08-12T15:30:00Z',
 # MAGIC    'resolved', 'P1', 'MPLS circuit failure - CKT-44521 down',
-# MAGIC    'Primary MPLS circuit CKT-44521 is completely down. EMR connectivity lost to DR site.',
+# MAGIC    'Primary MPLS circuit CKT-44521 is completely down. OSS/BSS connectivity lost to DR site.',
 # MAGIC    'MPLS', 'CKT-44521', 'Midwest', 'NOC-Engineer-7', '2026-08-12T09:30:00Z',
 # MAGIC    'Fiber cut at splice point SP-4421 in Naperville CO. Repair crew dispatched and splice completed.',
 # MAGIC    'Fiber splice repaired at SP-4421. Circuit restored at 3:30 PM CT. Monitoring for 24 hours. Customer informed that splice point has been reinforced and added to quarterly inspection rotation.');
@@ -170,7 +196,7 @@
 # MAGIC
 # MAGIC INSERT INTO playbooks VALUES
 # MAGIC   ('PB-001', 'fiber_cut', 'Fiber Cut Incident Response',
-# MAGIC    '## Fiber Cut Playbook\n\n### Timeline\n- T+0: Acknowledge ticket within SLA window. Confirm impact scope.\n- T+15min: Send initial customer communication with known impact and ETA if available.\n- T+1hr: Status update even if no new information. Show progress.\n- T+2hr: If not resolved, escalate internally and update customer with revised ETA.\n- T+4hr: If P1 Platinum, VP notification triggered automatically.\n\n### Messaging Guidance\n- Lead with what we know, not what we dont.\n- If this is a repeat incident on the same circuit, acknowledge it explicitly. Do NOT pretend it is a new issue.\n- Provide specific next steps and timeline, not vague reassurances.\n- For healthcare/financial customers, acknowledge business impact explicitly.\n\n### Template: Initial Acknowledgment\nSubject: [URGENT] Service Impact Notification - {ticket_id}\n\nDear {contact_name},\n\nWe are aware of a service disruption affecting your {service_type} circuit {circuit_id}. Our network operations center detected this issue at {detection_time} and our team is actively working on restoration.\n\n**Current Status:** {status_description}\n**Estimated Restoration:** {eta}\n**Your Reference:** {ticket_id}\n\nWe will provide updates every {update_cadence} until service is restored. You can also check real-time status at portal.lumen.com/status.\n\n{escalation_note_if_repeat_incident}\n\nSincerely,\nLumen Service Assurance'),
+# MAGIC    '## Fiber Cut Playbook\n\n### Timeline\n- T+0: Acknowledge ticket within SLA window. Confirm impact scope.\n- T+15min: Send initial customer communication with known impact and ETA if available.\n- T+1hr: Status update even if no new information. Show progress.\n- T+2hr: If not resolved, escalate internally and update customer with revised ETA.\n- T+4hr: If P1 Platinum, VP notification triggered automatically.\n\n### Messaging Guidance\n- Lead with what we know, not what we dont.\n- If this is a repeat incident on the same circuit, acknowledge it explicitly. Do NOT pretend it is a new issue.\n- Provide specific next steps and timeline, not vague reassurances.\n- For carrier/financial customers, acknowledge business impact explicitly.\n\n### Template: Initial Acknowledgment\nSubject: [URGENT] Service Impact Notification - {ticket_id}\n\nDear {contact_name},\n\nWe are aware of a service disruption affecting your {service_type} circuit {circuit_id}. Our network operations center detected this issue at {detection_time} and our team is actively working on restoration.\n\n**Current Status:** {status_description}\n**Estimated Restoration:** {eta}\n**Your Reference:** {ticket_id}\n\nWe will provide updates every {update_cadence} until service is restored. You can also check real-time status at portal.lumen.com/status.\n\n{escalation_note_if_repeat_incident}\n\nSincerely,\nLumen Service Assurance'),
 # MAGIC
 # MAGIC   ('PB-002', 'latency_spike', 'Latency / Packet Loss Response',
 # MAGIC    '## Latency Spike Playbook\n\n### Diagnostic Steps\n1. Confirm latency measurements (traceroute, ping, SNMP polling).\n2. Check for backbone congestion events (correlate with OUT- records).\n3. Review traffic engineering policies — is traffic being rerouted through a longer path?\n4. Check for DDoS mitigation engagement (could be scrubbing-related latency).\n5. If financial customer during market hours, treat as P1 regardless of classification.\n\n### Messaging Guidance\n- Be specific about the measurements: "We observed latency of {measured_ms}ms vs your baseline of {baseline_ms}ms."\n- For trading floor customers, acknowledge the financial impact explicitly.\n- Avoid technical jargon unless the contact is known to be technical.\n\n### Common Root Causes\n- Backbone congestion during traffic peaks\n- Traffic reroute due to maintenance or unrelated fiber event\n- DDoS scrubbing adding latency to clean traffic\n- CPE misconfiguration after firmware update'),
@@ -195,11 +221,11 @@
 # MAGIC   tone_flags ARRAY<STRING> COMMENT 'Tone markers: empathetic, technical, urgent, formal, escalation_aware'
 # MAGIC ) COMMENT 'Record of all customer communications per ticket for context continuity';
 # MAGIC
-# MAGIC -- Seed with one historical communication for the previous Meridian incident
+# MAGIC -- Seed with one historical communication for the previous LakeLink Fiber incident
 # MAGIC INSERT INTO communication_log VALUES
 # MAGIC   ('COMM-28847-001', 'INC-28847', 'CUST-001', '2026-08-12T09:35:00Z', 'email', 'outbound',
 # MAGIC    '[URGENT] Service Impact - INC-28847 - MPLS Circuit CKT-44521',
-# MAGIC    'Dear Sarah,\n\nWe are aware of the disruption to your MPLS circuit CKT-44521 and understand the critical nature of this connection to your healthcare operations. Our network operations center identified a fiber issue at approximately 9:15 AM CT and a repair crew has been dispatched.\n\nEstimated restoration: 3:00 PM CT\nYour reference: INC-28847\n\nWe will provide hourly updates until service is restored.\n\nSincerely,\nLumen Service Assurance',
+# MAGIC    'Dear Sarah,\n\nWe are aware of the disruption to your MPLS circuit CKT-44521 and understand the critical nature of this connection to your network operations. Our network operations center identified a fiber issue at approximately 9:15 AM CT and a repair crew has been dispatched.\n\nEstimated restoration: 3:00 PM CT\nYour reference: INC-28847\n\nWe will provide hourly updates until service is restored.\n\nSincerely,\nLumen Service Assurance',
 # MAGIC    'Comms Agent', ARRAY('empathetic', 'urgent')),
 # MAGIC   ('COMM-28847-002', 'INC-28847', 'CUST-001', '2026-08-12T15:45:00Z', 'email', 'outbound',
 # MAGIC    '[RESOLVED] Service Restored - INC-28847 - MPLS Circuit CKT-44521',
